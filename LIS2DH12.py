@@ -276,7 +276,3 @@ class LIS2DH12:
     def __exit__(self, exception_type, exception_value, traceback):
         pass
 
-
-    
-    
-
