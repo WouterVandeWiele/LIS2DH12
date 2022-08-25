@@ -6,12 +6,7 @@ from micropython import const
 
 class LIS2DH12:
     SI = const(9.81)
-    BACKLIGHT_MIN = const(0)
-    BACKLIGHT_MAX = const(10)
-    '''
-    product page: https://www.st.com/en/mems-and-sensors/lis2dh12.html
-    datasheet: https://www.st.com/resource/en/datasheet/lis2dh12.pdf
-    '''
+
     def __init__(
             self,
             i2c,
@@ -21,38 +16,7 @@ class LIS2DH12:
             data_rate = '10Hz',
             scale = '2g',
             output_units = 'G',
-            backlight_duty = 10,
-            timer = 0,
         ):
-        '''
-        Initialize a new class to extract values from an LIS2DH12 accelerometer sensor.
-        
-        :param i2c: machine.SoftI2C instance, connected to the accelerometer.
-        :param address: I2C bus address of the accelerometer.
-        :param sensors: String containing the senor axis to enable. Can contain 'x', 'y' and/or 'z'.
-        :param bit_mode: Measurement size on the sensor. Either 8, 10 or 12.
-        :param data_rate: Speed at which the sensor collects the measurement values.
-            Can be: '1Hz', '10Hz', '25Hz', '50Hz', '100Hz', '200Hz', '400Hz' or
-            - In 8 bit_mode: '1.344kHz' or '1.620kHz'
-            - In 10 or 12 bit_mode: '5.376kHz'
-        :param scale: Sensitivity at which the sensor takes measurements. 
-            Will be scaled automatically by this library to SI m/s² or G-factor.
-            Can be: '2g', '4g', '8g' or '16g'
-        :param output_units: output values in SI-units (m/s²) or G's. Can be either: 'SI' or 'G'
-        # :param backlight: enable INT2 functions and switch to active high signal. (fri3d badge backlight)
-        
-        ### example fri3d 2022 badge
-        >>> from LIS2DH12 import LIS2DH12
-        >>> i2c = BADGE.i2c()
-        >>> a = LIS2DH12(i2c, 0x18)
-        >>> print(a.acceleration)
-        
-        ### or with a context manager
-        >>> from LIS2DH12 import LIS2DH12
-        >>> i2c = BADGE.i2c()
-        >>> with LIS2DH12(i2c, 0x18) as a:
-        >>>     print(a.acceleration)
-        '''
         
         self._i2c = i2c
         self._address = address
@@ -62,10 +26,6 @@ class LIS2DH12:
         self._scale_factor = None
         self._scale_divide = 1
         self._output_units = None
-        self._backlight_duty = None
-        self._timer_value = timer
-        self._timer = None
-        self._stop_timer = False
         
         # control reg[0] starts at CTRL_REG1 (0x20)
         self._ctrl_reg = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
@@ -76,7 +36,6 @@ class LIS2DH12:
             data_rate = data_rate,
             scale = scale,
             output_units = output_units,
-            backlight_duty = backlight_duty
         )
 
 
@@ -87,27 +46,8 @@ class LIS2DH12:
             data_rate = None,
             scale = None,
             output_units = None,
-            backlight_duty = 10,
             verbose = False,
         ):
-        '''
-        Modify parameters for the next measurement value readout.
-        
-        :param i2c: Machine.SoftI2C instance, connected to the accelerometer.
-        :param address: I2C bus address of the accelerometer.
-        :param sensors: String containing the senor axis to enable. Can contain 'x', 'y' and/or 'z'.
-        :param bit_mode: Measurement size on the sensor. Either 8, 10 or 12.
-        :param data_rate: Speed at which the sensor collects the measurement values.
-            Can be: '1Hz', '10Hz', '25Hz', '50Hz', '100Hz', '200Hz', '400Hz' or
-            - In 8 bit_mode: '1.344kHz' or '1.620kHz'
-            - In 10 or 12 bit_mode: '5.376kHz'
-        :param scale: Sensitivity at which the sensor takes measurements. 
-            Will be scaled automatically by this library to SI m/s² or G-factor.
-            Can be: '2g', '4g', '8g' or '16g'
-        :param output_units: output values in SI-units (m/s²) or G's. Can be either: 'SI' or 'G'
-        :param backlight: enable INT2 functions and switch to active high signal. (fri3d badge backlight)
-        :param verbose: show what is going to be writen to ctrl_reg1 - ctrl_reg6
-        '''
         if sensors:
             self._enable_sensors(sensors)
         if bit_mode:
@@ -124,23 +64,7 @@ class LIS2DH12:
                     f'unknown output units: {output_units}'
                 )
 
-        if backlight_duty:
-            self._timer = None
-            
-            if (self.BACKLIGHT_MIN > backlight_duty):
-                self._stop_timer = True
-                self._backlight_duty = self.BACKLIGHT_MIN
-            elif (backlight_duty > self.BACKLIGHT_MAX):
-                self._stop_timer = True
-                self._backlight_duty = self.BACKLIGHT_MAX
-            else:
-                self._backlight_duty = backlight_duty
-                self._stop_timer = False
-                self._timer = machine.Timer(self._timer_value)
-                self._enable_backlight_timer_on(self._backlight_duty)
-                
-            self._enable_backlight(self._backlight_duty)
-
+        self.enable_backlight(True)
         byte_array = b''.join([ustruct.pack('<b', x) for x in self._ctrl_reg])
         if verbose:
             print(f'byte_array: {byte_array}')
@@ -255,7 +179,7 @@ class LIS2DH12:
             )
 
 
-    def _enable_backlight(self, enable):
+    def enable_backlight(self, enable):
         if enable:
             self._ctrl_reg[5] = const(0xFF)
             self._i2c.writeto_mem(self._address, 0x25, b'\FF')
@@ -264,39 +188,8 @@ class LIS2DH12:
             self._i2c.writeto_mem(self._address, 0x25, b'\00')
 
 
-    def _enable_backlight_timer_on(self, event):
-        self._enable_backlight(False)
-        
-        # self._timer.deinit()
-        if not(self._stop_timer): # and (self._backlight_duty == self.BACKLIGHT_MIN)):
-            self._timer.init(
-                period=self.BACKLIGHT_MAX-self._backlight_duty,
-                mode=machine.Timer.ONE_SHOT,
-                callback=self._enable_backlight_timer_off
-            )
-        
-
-    def _enable_backlight_timer_off(self, event):
-        self._enable_backlight(True)
-        
-        # self._timer.deinit()
-        if not(self._stop_timer): # and (self._backlight_duty == self.BACKLIGHT_MAX)):
-            self._timer.init(
-                period=self._backlight_duty,
-                mode=machine.Timer.ONE_SHOT,
-                callback=self._enable_backlight_timer_on
-            )
-        
-    
     @property
     def acceleration(self, verbose: bool=False):
-        '''
-        Get a measurement value.
-        
-        :param verbose: show the raw values from the LSB and MSB from the x, y and z registers.
-            Next show the decoded and scaled measurement values.
-        :return: list with the parsed x, y and z measurements.
-        '''
         xyz = [0, 0, 0]
         lsb_buffer = 0
         value_raw = self._i2c.readfrom_mem(self._address, 0xA8, 6)
@@ -319,10 +212,6 @@ class LIS2DH12:
   
     @property
     def whoami(self):
-        '''
-        Read LIS2DH12 accelerometer ID.
-        :return: should be int: 51.
-        '''
         return ord(
             self._i2c.readfrom_mem(self._address, 0x0F, 1)
         )
