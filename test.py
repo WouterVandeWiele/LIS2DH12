@@ -12,6 +12,11 @@ timer0.init(period=1000, mode=machine.Timer.PERIODIC, callback=lambda t: print(a
 #timer0.deinit()
 
 
+d = BADGE.display()
+d.fill(2000)
+
+a.modify(backlight_duty=10)
+
 
 # formatting example
 

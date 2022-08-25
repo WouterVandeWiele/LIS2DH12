@@ -3,9 +3,11 @@ import time
 import machine
 from micropython import const
 
+
 class LIS2DH12:
     SI = const(9.81)
-
+    BACKLIGHT_MIN = const(0)
+    BACKLIGHT_MAX = const(10)
     '''
     product page: https://www.st.com/en/mems-and-sensors/lis2dh12.html
     datasheet: https://www.st.com/resource/en/datasheet/lis2dh12.pdf
@@ -19,12 +21,13 @@ class LIS2DH12:
             data_rate = '10Hz',
             scale = '2g',
             output_units = 'G',
-            enable_interrupts = True,
+            backlight_duty = 10,
+            timer = 0,
         ):
         '''
         Initialize a new class to extract values from an LIS2DH12 accelerometer sensor.
         
-        :param i2c: Machine.SoftI2C instance, connected to the accelerometer.
+        :param i2c: machine.SoftI2C instance, connected to the accelerometer.
         :param address: I2C bus address of the accelerometer.
         :param sensors: String containing the senor axis to enable. Can contain 'x', 'y' and/or 'z'.
         :param bit_mode: Measurement size on the sensor. Either 8, 10 or 12.
@@ -36,7 +39,7 @@ class LIS2DH12:
             Will be scaled automatically by this library to SI m/s² or G-factor.
             Can be: '2g', '4g', '8g' or '16g'
         :param output_units: output values in SI-units (m/s²) or G's. Can be either: 'SI' or 'G'
-        :param enable_interrupts: enable INT2 functions and switch to active high signal.
+        # :param backlight: enable INT2 functions and switch to active high signal. (fri3d badge backlight)
         
         ### example fri3d 2022 badge
         >>> from LIS2DH12 import LIS2DH12
@@ -59,6 +62,10 @@ class LIS2DH12:
         self._scale_factor = None
         self._scale_divide = 1
         self._output_units = None
+        self._backlight_duty = None
+        self._timer_value = timer
+        self._timer = None
+        self._stop_timer = False
         
         # control reg[0] starts at CTRL_REG1 (0x20)
         self._ctrl_reg = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
@@ -68,8 +75,10 @@ class LIS2DH12:
             bit_mode = bit_mode,
             data_rate = data_rate,
             scale = scale,
-            output_units = output_units
+            output_units = output_units,
+            backlight_duty = backlight_duty
         )
+
 
     def modify(
             self,
@@ -78,8 +87,8 @@ class LIS2DH12:
             data_rate = None,
             scale = None,
             output_units = None,
-            enable_interrupt = None,
-            verbose = False
+            backlight_duty = 10,
+            verbose = False,
         ):
         '''
         Modify parameters for the next measurement value readout.
@@ -96,7 +105,7 @@ class LIS2DH12:
             Will be scaled automatically by this library to SI m/s² or G-factor.
             Can be: '2g', '4g', '8g' or '16g'
         :param output_units: output values in SI-units (m/s²) or G's. Can be either: 'SI' or 'G'
-        :param enable_interrupts: enable INT2 functions and switch to active high signal.
+        :param backlight: enable INT2 functions and switch to active high signal. (fri3d badge backlight)
         :param verbose: show what is going to be writen to ctrl_reg1 - ctrl_reg6
         '''
         if sensors:
@@ -114,13 +123,29 @@ class LIS2DH12:
                 raise RuntimeError(
                     f'unknown output units: {output_units}'
                 )
-        if enable_interrupt:
-            self._enable_interrupts(enable_interrupt)
-        
+
+        if backlight_duty:
+            self._timer = None
+            
+            if (self.BACKLIGHT_MIN > backlight_duty):
+                self._stop_timer = True
+                self._backlight_duty = self.BACKLIGHT_MIN
+            elif (backlight_duty > self.BACKLIGHT_MAX):
+                self._stop_timer = True
+                self._backlight_duty = self.BACKLIGHT_MAX
+            else:
+                self._backlight_duty = backlight_duty
+                self._stop_timer = False
+                self._timer = machine.Timer(self._timer_value)
+                self._enable_backlight_timer_on(self._backlight_duty)
+                
+            self._enable_backlight(self._backlight_duty)
+
         byte_array = b''.join([ustruct.pack('<b', x) for x in self._ctrl_reg])
         if verbose:
             print(f'byte_array: {byte_array}')
         self._i2c.writeto_mem(self._address, 0xA0, byte_array)
+
 
     def _enable_sensors(self, sensors):
         # enable sensors
@@ -131,6 +156,7 @@ class LIS2DH12:
             self._ctrl_reg[0] |= const(0x02)
         if 'z' in sensors:
             self._ctrl_reg[0] |= const(0x04)
+
 
     def _measurement_size(self, bit_mode):
         # configure measurement size
@@ -151,6 +177,7 @@ class LIS2DH12:
             raise RuntimeError(
                 f'Unknow bit mode selected: {bit_mode}'
             )
+
 
     def _data_rate(self, data_rate):
         # configure data rate
@@ -203,7 +230,8 @@ class LIS2DH12:
             raise RuntimeError(
                 f'Unknow data rate selected: {data_rate}'
             )
-            
+
+
     def _scale(self, scale):
         self._ctrl_reg[3] &= const(0x30)
         if scale == '2g':
@@ -225,12 +253,41 @@ class LIS2DH12:
             raise RuntimeError(
                 f'Unknow scale: {scale}'
             )
-            
-    def _enable_interrupts(self, enable):
-        self._ctrl_reg[5] &= const(0xF0)
-        if enable:
-            self._ctrl_reg[5] |= const(0x0A)
 
+
+    def _enable_backlight(self, enable):
+        if enable:
+            self._ctrl_reg[5] = const(0xFF)
+            self._i2c.writeto_mem(self._address, 0x25, b'\FF')
+        else:
+            self._ctrl_reg[5] = const(0x00)
+            self._i2c.writeto_mem(self._address, 0x25, b'\00')
+
+
+    def _enable_backlight_timer_on(self, event):
+        self._enable_backlight(False)
+        
+        # self._timer.deinit()
+        if not(self._stop_timer): # and (self._backlight_duty == self.BACKLIGHT_MIN)):
+            self._timer.init(
+                period=self.BACKLIGHT_MAX-self._backlight_duty,
+                mode=machine.Timer.ONE_SHOT,
+                callback=self._enable_backlight_timer_off
+            )
+        
+
+    def _enable_backlight_timer_off(self, event):
+        self._enable_backlight(True)
+        
+        # self._timer.deinit()
+        if not(self._stop_timer): # and (self._backlight_duty == self.BACKLIGHT_MAX)):
+            self._timer.init(
+                period=self._backlight_duty,
+                mode=machine.Timer.ONE_SHOT,
+                callback=self._enable_backlight_timer_on
+            )
+        
+    
     @property
     def acceleration(self, verbose: bool=False):
         '''
@@ -248,17 +305,18 @@ class LIS2DH12:
         	print(value_raw)
         
         for index in range(3):
-	        value = value_raw[index*2:index*2+2]
-	        xyz[index] = ustruct.unpack('<h', value)[0] / self._scale_divide
-	        
-	        if self._output_units == 'SI':
-	            xyz[index] *= self.SI
-	        
-	        if verbose:
-	            print(f'index {index}, {value}')
-	    
+            value = value_raw[index*2:index*2+2]
+            xyz[index] = ustruct.unpack('<h', value)[0] / self._scale_divide
+
+            if self._output_units == 'SI':
+                xyz[index] *= self.SI
+
+            if verbose:
+                print(f'index {index}, {value}')
+
         return xyz
-        
+
+  
     @property
     def whoami(self):
         '''
@@ -268,10 +326,12 @@ class LIS2DH12:
         return ord(
             self._i2c.readfrom_mem(self._address, 0x0F, 1)
         )
-    
+
+
     # context manager stuff:
     def __enter__(self):
         return self
+
 
     def __exit__(self, exception_type, exception_value, traceback):
         pass
