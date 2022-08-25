@@ -12,7 +12,8 @@ Based on ![LIS2HH12](https://github.com/tuupola/micropython-lis2hh12/blob/ffba6a
 ### (method) __init__
 
 Initialize a new class to extract values from an LIS2DH12 accelerometer sensor.
-        
+
+```
 :param i2c: machine.SoftI2C instance, connected to the accelerometer.
 :param address: I2C bus address of the accelerometer.
 :param sensors: String containing the senor axis to enable. Can contain 'x', 'y' and/or 'z'.
@@ -25,6 +26,8 @@ Initialize a new class to extract values from an LIS2DH12 accelerometer sensor.
     Will be scaled automatically by this library to SI m/s² or G-factor.
     Can be: '2g', '4g', '8g' or '16g'
 :param output_units: output values in SI-units (m/s²) or G's. Can be either: 'SI' or 'G'
+```
+
 
 ```python
 ### example fri3d 2022 badge
@@ -44,7 +47,8 @@ with LIS2DH12(i2c, 0x18) as a:
 ### (method) modify
 
 Modify parameters for the next measurement value readout.
-        
+
+```
 :param i2c: Machine.SoftI2C instance, connected to the accelerometer.
 :param address: I2C bus address of the accelerometer.
 :param sensors: String containing the senor axis to enable. Can contain 'x', 'y' and/or 'z'.
@@ -58,25 +62,30 @@ Modify parameters for the next measurement value readout.
     Can be: '2g', '4g', '8g' or '16g'
 :param output_units: output values in SI-units (m/s²) or G's. Can be either: 'SI' or 'G'
 :param verbose: show what is going to be writen to ctrl_reg1 - ctrl_reg6
-
+```
 
 ### (method) enable_backlight
 
 Enable or disable the backlight on the fri3d 2022 badge.
 The line that controls the backlight is connected to the INT2 pin of the accelerometer.
 
+```
 :param enable: boolean: True to turn on the backlight, false to turn off.
+```
 
 ### (attribute - read only)
 
 Get a measurement value.
-        
+
+```        
 :param verbose: show the raw values from the LSB and MSB from the x, y and z registers.
     Next show the decoded and scaled measurement values.
 :return: list with the parsed x, y and z measurements.
+```
 
 ### (attribute - read only) whoami
 
 Read LIS2DH12 accelerometer ID.
-
+```
 :return: should be int: 51.
+```
